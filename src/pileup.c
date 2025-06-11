@@ -10,8 +10,7 @@
 #include "faidx.h"
 #include "ksort.h"
 #include "ketopt.h"
-
-#define VERSION "1.4-r19"
+#include "version.h"
 
 const char *hts_parse_reg(const char *s, int *beg, int *end);
 void *bed_read(const char *fn);
@@ -171,7 +170,7 @@ static void count_alleles(paux_t *pa, int n)
 int main(int argc, char *argv[])
 {
 	int i, j, n, tid, beg, end, pos, *n_plp, baseQ = 0, mapQ = 0, min_len = 0, l_ref = 0, min_support = 1, min_support_strand = 0, min_supp_len = 0;
-	int is_vcf = 0, var_only = 0, show_2strand = 0, trim_len = 0, del_as_allele = 0, proper_only = 0;
+	int is_vcf = 0, var_only = 0, show_2strand = 0, trim_len = 0, del_as_allele = 0, proper_only = 0, maj_only = 0;
 	int last_tid;
 	double min_af = 0.0;
 	const bam_pileup1_t **plp;
@@ -186,7 +185,7 @@ int main(int argc, char *argv[])
 	ketopt_t o = KETOPT_INIT;
 
 	// parse the command line
-	while ((n = ketopt(&o, argc, argv, 1, "r:q:Q:l:f:p:vcCS:s:b:T:ea:yVP", 0)) >= 0) {
+	while ((n = ketopt(&o, argc, argv, 1, "r:q:Q:l:f:p:vcCS:s:b:T:ea:yMVP", 0)) >= 0) {
 		if (n == 'f') { fname = o.arg; fai = fai_load(fname); }
 		else if (n == 'b') bed = bed_read(o.arg);
 		else if (n == 'l') min_len = atoi(o.arg); // minimum query length
@@ -202,10 +201,14 @@ int main(int argc, char *argv[])
 		else if (n == 'T') trim_len = atoi(o.arg);
 		else if (n == 'e') del_as_allele = 1;
 		else if (n == 'p') min_af = atof(o.arg);
+		else if (n == 'M') maj_only = 1;
 		else if (n == 'P') proper_only = 1;
 		else if (n == 'y') mapQ = 20, baseQ = 20, min_support = 5, min_support_strand = 2, is_vcf = var_only = show_2strand = 1;
 		else if (n == 'V') {
-			puts(VERSION);
+			if (strlen(BRANCH_COMMIT))
+				printf("%s (%s)\n", VERSION, BRANCH_COMMIT);
+			else
+				puts(VERSION);
 			return 0;
 		}
 	}
@@ -238,6 +241,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "    -s INT       drop alleles with depth<INT [%d]\n", min_support);
 		fprintf(stderr, "    -a INT       drop alleles with depth<INT on either strand [%d]\n", min_support_strand);
 		fprintf(stderr, "    -p FLOAT     drop an allele if the allele fraction is below FLOAT [%g]\n", min_af);
+		fprintf(stderr, "    -M           drop all minor alleles (one bam only)\n");
 		return 1;
 	}
 
@@ -303,6 +307,8 @@ int main(int argc, char *argv[])
 		fputs("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT", stdout);
 		for (i = 0; i < n; ++i) printf("\t%s", argv[o.ind+i]);
 		putchar('\n');
+		// forced off for multiple bams
+		if (n > 1) maj_only = 0;
 	}
 	while (bam_mplp_auto(mplp, &tid, &pos, n_plp, plp) > 0) { // come to the next covered position
 		if (pos < beg || pos >= end) continue; // out of range; skip
@@ -335,13 +341,26 @@ int main(int argc, char *argv[])
 			// count alleles
 			ks_introsort(allele, aux.n_a, aux.a);
 			count_alleles(&aux, n);
-			// squeeze out weak alleles
-			for (i = k = 0; i < aux.n_a; ++i)
-				if (aux.support[a[i].k] >= min_support && aux.support[a[i].k] >= aux.n_a * min_af
-					&& aux.support_strand[a[i].k<<1] >= min_support_strand && aux.support_strand[a[i].k<<1|1] >= min_support_strand)
-				{
-					a[k++] = a[i];
-				}
+			// select major alleles only, alt Ns are also filtered
+			if (maj_only)
+			{
+				int maj_supp = 0;
+				for (i = 0; i < aux.n_a; ++i)
+					maj_supp = fmax(maj_supp, aux.support[a[i].k]);
+				for (i = k = 0; i < aux.n_a; ++i)
+					if (aux.support[a[i].k] == maj_supp && aux.a[i].b != 15)
+						a[k++] = a[i];
+			}
+			else
+			{
+				// squeeze out weak alleles
+				for (i = k = 0; i < aux.n_a; ++i)
+					if (aux.support[a[i].k] >= min_support && aux.support[a[i].k] >= aux.n_a * min_af
+						&& aux.support_strand[a[i].k<<1] >= min_support_strand && aux.support_strand[a[i].k<<1|1] >= min_support_strand)
+					{
+						a[k++] = a[i];
+					}
+			}
 			if (k < aux.n_a) {
 				if (k == 0) continue; // no alleles are good enough
 				aux.n_a = k;
@@ -435,7 +454,10 @@ int main(int argc, char *argv[])
 	free(data); free(reg);
 	if (bed) bed_destroy(bed);
 
-	fprintf(stderr, "[M::%s] Version: %s\n", __func__, VERSION);
+	if (strlen(BRANCH_COMMIT))
+		fprintf(stderr, "[M::%s] Version: %s (%s)\n", __func__, VERSION, BRANCH_COMMIT);
+	else
+		fprintf(stderr, "[M::%s] Version: %s\n", __func__, VERSION);
 	fprintf(stderr, "[M::%s] CMD:", __func__);
 	for (i = 0; i < argc; ++i)
 		fprintf(stderr, " %s", argv[i]);
