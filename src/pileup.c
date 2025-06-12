@@ -344,11 +344,15 @@ int main(int argc, char *argv[])
 			// select major alleles only, alt Ns are also filtered
 			if (maj_only)
 			{
-				int maj_supp = 0;
+				int maj_supp = 0, maj_base = 0;
 				for (i = 0; i < aux.n_a; ++i)
-					maj_supp = fmax(maj_supp, aux.support[a[i].k]);
+					if (aux.support[a[i].k] > maj_supp && aux.a[i].b != 15)
+					{
+						maj_supp = aux.support[a[i].k];
+						maj_base = aux.a[i].b;
+					}
 				for (i = k = 0; i < aux.n_a; ++i)
-					if (aux.support[a[i].k] == maj_supp && aux.a[i].b != 15)
+					if (aux.support[a[i].k] == maj_supp && aux.a[i].b == maj_base)
 						a[k++] = a[i];
 			}
 			else
