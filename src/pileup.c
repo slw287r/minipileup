@@ -359,8 +359,11 @@ int main(int argc, char *argv[])
 			{
 				// squeeze out weak alleles
 				for (i = k = 0; i < aux.n_a; ++i)
-					if (aux.support[a[i].k] >= min_support && aux.support[a[i].k] >= aux.n_a * min_af
-						&& aux.support_strand[a[i].k<<1] >= min_support_strand && aux.support_strand[a[i].k<<1|1] >= min_support_strand)
+					if (aux.support[a[i].k] >= min_support &&
+							aux.support[a[i].k] >= aux.n_a * min_af &&
+							aux.support_strand[a[i].k<<1] >= min_support_strand &&
+							aux.support_strand[a[i].k<<1|1] >= min_support_strand &&
+							aux.a[i].b != 15)
 					{
 						a[k++] = a[i];
 					}
